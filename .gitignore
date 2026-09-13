@@ -1,0 +1,15 @@
+node_modules/
+.next/
+out/
+build/
+.DS_Store
+*.pem
+npm-debug.log*
+.env
+.env*.local
+next-env.d.ts
+tsconfig.tsbuildinfo
+
+# 凭据一律走环境变量注入：
+# 本地写在 .env.local（上面的 .env* 规则已忽略），线上写在 Vercel 环境变量。
+# src/config/zhihu.ts 已不含任何明文凭据，必须提交以保证构建成功。
