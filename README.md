@@ -38,49 +38,40 @@ npm run start
 
 ## 一、配置凭据（必读）
 
-所有凭据集中在 **`src/config/zhihu.ts`**，按需求直接写在源码中，便于项目独立部署。
+**所有凭据一律通过环境变量注入，源码中不含任何明文机密。**
+`src/config/zhihu.ts` 只负责读取，可安全提交到仓库。
 
-| 配置项 | 说明 | 当前状态 |
+| 环境变量 | 说明 | 是否必填 |
 |---|---|---|
-| `ZHIHU_ACCESS_SECRET` | 开放平台 Access Secret，鉴权**调用方** | ✅ 已通过 `zhihu-cli` 配置到系统凭证库 |
-| `ZHIHU_OAUTH_APP_ID` | OAuth 应用 ID，赛事页面分配 | ⚠️ **待赛事页面提供** |
-| `ZHIHU_OAUTH_APP_KEY` | OAuth 应用密钥，赛事页面分配 | ⚠️ **待赛事页面提供** |
-| `ZHIHU_OAUTH_REDIRECT_URI` | 回调地址，**必须与申请时登记的完全一致** | `http://localhost:3000/api/auth/callback` |
-| `SESSION_SECRET` | 会话 Cookie 签名密钥，部署前请换成随机长字符串 | 默认值 |
+| `ZHIHU_ACCESS_SECRET` | 开放平台 Access Secret，鉴权**调用方** | 必填 |
+| `ZHIHU_OAUTH_APP_ID` | OAuth 应用 ID，赛事页面分配 | 必填 |
+| `ZHIHU_OAUTH_APP_KEY` | OAuth 应用密钥，赛事页面分配 | 必填 |
+| `ZHIHU_OAUTH_REDIRECT_URI` | 回调地址，**必须与赛事页面登记值逐字符一致** | 必填 |
+| `SESSION_SECRET` | 会话 Cookie 签名密钥，须为随机长字符串 | 必填 |
+| `ZHIHU_OPEN_API_BASE` | 内容接口基址，仅本地联调时覆盖 | 选填 |
+| `ZHIHU_OAUTH_BASE` | OAuth 接口基址，仅本地联调时覆盖 | 选填 |
 
-### 1. Access Secret
+### 1. 本地开发
 
-Access Secret 已通过 `zhihu-cli auth set` 保存到**操作系统凭证库**并验证有效
-（掩码 `6144...a1b2`）。CLI 不输出明文，因此运行本项目时需通过环境变量提供：
-
-```bash
-ZHIHU_ACCESS_SECRET=<你的 Access Secret> npm run start
-```
-
-未提供时，首页会显示明确的配置引导，而不是白屏或报错。
-
-### 2. OAuth 凭据（已配置）
-
-黑客松的 `app_id` / `app_key` 由**赛事页面分配**，不走通用邮件申请流程。
-
-当前项目已填入赛事分配的凭据（`src/config/zhihu.ts`，该文件已在 `.gitignore` 中忽略）：
-
-- `app_id`：`471`
-- `app_key`：仅存于服务端配置，不出现在客户端产物中
-
-已实测确认：授权地址 `https://openapi.zhihu.com/authorize?app_id=471&...` 被知乎正常受理
-（302 跳转到知乎登录页），未再出现应用不存在类错误。
-
-若凭据变更，填入 `src/config/zhihu.ts` 或设置环境变量即可。
-未配置时点击登录会跳到 `/login-error` 并给出明确提示。
-
-### 3. 用环境变量覆盖（推荐用于生产）
-
-每个配置项都支持同名环境变量覆盖，优先级高于源码内置值：
+复制模板并填入真实值（`.env.local` 已被 `.gitignore` 忽略，Next.js 会自动加载）：
 
 ```bash
-ZHIHU_ACCESS_SECRET=xxx ZHIHU_OAUTH_APP_ID=yyy npm run start
+cp .env.example .env.local
 ```
+
+`SESSION_SECRET` 可用以下命令生成：
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
+```
+
+凭据缺失时，页面会显示明确的配置引导，而不是白屏或报错。
+
+### 2. 关于 OAuth 凭据
+
+黑客松的 `app_id` / `app_key` 由**赛事页面分配**，不走通用邮件申请流程，
+且区别于开放平台的 Access Secret。已实测确认授权端点正常受理本应用
+（302 跳转到知乎登录页）。
 
 > **实现要点**：配置通过 `getAccessSecret()` 等**函数在运行时读取** `process.env`。
 > 如果写成模块顶层的 `process.env.X ?? '默认值'`，Next.js 会在 build 阶段把整个表达式
@@ -88,17 +79,67 @@ ZHIHU_ACCESS_SECRET=xxx ZHIHU_OAUTH_APP_ID=yyy npm run start
 
 ---
 
-## 二、安全说明
+## 二、部署到 Vercel
 
-- `src/config/zhihu.ts` 已加入 `.gitignore`，避免凭据被误提交到公开仓库。
+### 1. 推送代码到 Git 仓库
+
+仓库中**不含任何明文凭据**，可以安全推送到 GitHub：
+
+```bash
+git remote add origin <你的仓库地址>
+git push -u origin master
+```
+
+### 2. 导入 Vercel 并配置环境变量
+
+在 Vercel 导入该仓库（框架会自动识别为 Next.js），然后在
+**Settings → Environment Variables** 中添加上表中的全部必填变量。
+
+⚠️ `ZHIHU_OAUTH_REDIRECT_URI` 必须填公网 HTTPS 地址，例如：
+
+```
+https://<your-app>.vercel.app/api/auth/callback
+```
+
+该值必须与赛事页面登记的回调地址**逐字符一致**（协议、域名、端口、路径、尾斜杠），
+否则换取 token 会被拒绝。由于域名在首次部署后才确定，建议顺序为：
+先部署 → 拿到域名 → 回填环境变量并到赛事页面登记 → 重新部署生效。
+
+### 3. 重新部署
+
+环境变量修改后必须触发一次重新部署才会生效（Vercel 不会热更新已有部署）。
+
+### 4. ⚠️ Serverless 架构下的已知行为（务必阅读）
+
+本项目的业务数据（观点、交流请求、对话）与 OAuth state 一次性消费记录
+均保存在**进程内存**中。Vercel 采用多实例 Serverless 架构，实例会被回收，
+也不保证同一用户的连续请求落在同一实例上。因此线上会出现：
+
+- **新发表的观点可能在下次刷新后消失**（请求落到了另一个实例）；
+- **交流请求与对话可能时有时无**；
+- **OAuth state 防重放降级**：重放拦截依赖内存记录，跨实例时可能拦不住。
+  签名校验、有效期校验、Cookie 一次性删除仍然有效，登录 CSRF 防护未失效。
+
+演示用的 8 条种子观点由代码在每个实例启动时写入，因此**匹配功能的演示效果
+始终正常**：登录后发表观点即可看到相似度与匹配理由。
+
+彻底解决需要把 `src/lib/store.ts` 与 `src/lib/state-store.ts` 替换为
+Redis（如 Vercel KV）或 Postgres，两个文件的函数签名即为替换边界。
+
+---
+
+## 三、安全说明
+
+- 源码与版本库中**不含任何明文凭据**，机密全部由环境变量注入。
 - 凭据模块与 API 客户端均标记 `server-only`，**不会被打包进浏览器产物**。
+  构建后已扫描 `.next/static` 确认无密钥字样。
 - OAuth `access_token` 只存放在 **HttpOnly + 签名** 的 Cookie 中，
   浏览器 JS 无法读取，也不会出现在 URL 或前端日志里。
 - `app_key` 与 token 交换全程在服务端完成。
 
 ---
 
-## 三、目录结构
+## 四、目录结构
 
 ```
 src/
@@ -131,7 +172,7 @@ src/
 
 ---
 
-## 四、接口对接说明
+## 五、接口对接说明
 
 ### 鉴权规则
 
@@ -196,18 +237,18 @@ src/
 导致从 `127.0.0.1` 访问时重定向后主机名改变，浏览器不再回传 HttpOnly 会话 Cookie，
 表现为「登录成功却仍未登录」。这是实测中发现并修复的问题。
 
-## 五、已知限制
+## 六、已知限制
 
 - **热榜额度**：开发期间真实接口曾持续返回 `Code 30001 rate limit exceeded`
   （账号级配额，用 `zhihu-cli` 直连同样如此）。页面会把该错误原样提示给用户。
 - **npm audit**：`next` 已升级到 15.5.25（修复了 15.1.6 的 CVE-2025-66478）。
   剩余 `postcss` 传递依赖告警需升级到 next@16 大版本才能消除，属破坏性变更，未执行。
-- **OAuth 凭据**：`app_id` / `app_key` 已填入赛事分配值并通过授权端点实测受理。
-  尚未完成端到端真实账号授权，原因是回调地址仍指向本地，需部署到公网后配套登记。
-- **state 存储**：一次性消费记录使用进程内存，多实例部署需替换为共享存储。
-- **业务数据存储**：观点、请求、对话存于进程内存并预置 8 条种子观点，
-  进程重启后新增数据丢失，多实例不共享。生产化需替换为 Postgres/Redis，
-  `src/lib/store.ts` 的函数签名即接口边界。
+- **OAuth 凭据**：`app_id` / `app_key` 已通过环境变量注入并经授权端点实测受理。
+  尚未完成端到端真实账号授权，需部署到公网、登记回调地址后才能跑通。
+- **Serverless 内存限制**：state 一次性消费记录与业务数据（观点、请求、对话）
+  均使用进程内存。部署到 Vercel 等多实例平台后，数据可能在实例间不一致或丢失，
+  state 防重放会降级（签名与有效期校验仍有效）。详见「二、部署到 Vercel」第 4 节。
+  替换边界为 `src/lib/store.ts` 与 `src/lib/state-store.ts` 的函数签名。
 - **匹配算法**：概念词典为人工维护的有限集合（9 组议题），未覆盖的同义表达
   仍依赖词面匹配。
 - **对话实时性**：请求式刷新，未接入 WebSocket。

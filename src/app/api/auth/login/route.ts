@@ -17,7 +17,7 @@ export async function GET(request: NextRequest) {
       new URL(
         '/login-error?reason=' +
           encodeURIComponent(
-            'OAuth 应用凭据尚未配置，请在 src/config/zhihu.ts 或环境变量中填写赛事页面分配的 app_id 与 app_key。',
+            'OAuth 应用凭据尚未配置。请设置环境变量 ZHIHU_OAUTH_APP_ID 与 ZHIHU_OAUTH_APP_KEY（本地写入 .env.local，线上在 Vercel 环境变量中配置）。',
           ),
         origin,
       ),

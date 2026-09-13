@@ -48,7 +48,7 @@ export class ZhihuApiError extends Error {
 function buildHeaders(oauthToken?: string): Record<string, string> {
   if (!isAccessSecretConfigured()) {
     throw new ZhihuApiError(
-      '尚未配置知乎开放平台 Access Secret，请在 src/config/zhihu.ts 中填写 ZHIHU_ACCESS_SECRET。',
+      '尚未配置知乎开放平台 Access Secret，请设置环境变量 ZHIHU_ACCESS_SECRET。',
       -1,
       500,
     );

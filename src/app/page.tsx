@@ -43,9 +43,9 @@ export default async function HomePage() {
       <>
         <h1 className="page-title">知乎热榜</h1>
         <div className="notice notice--warn">
-          尚未配置知乎开放平台 Access Secret。请打开{' '}
-          <code>src/config/zhihu.ts</code>，把{' '}
-          <code>ZHIHU_ACCESS_SECRET</code> 替换为你在{' '}
+          尚未配置知乎开放平台 Access Secret。请设置环境变量{' '}
+          <code>ZHIHU_ACCESS_SECRET</code>（本地写入 <code>.env.local</code>，
+          线上在 Vercel 环境变量中配置），值可在{' '}
           <a
             href="https://developer.zhihu.com/profile"
             target="_blank"
@@ -53,7 +53,7 @@ export default async function HomePage() {
           >
             开放平台个人中心
           </a>{' '}
-          获取的真实值后刷新页面。
+          获取。配置后重新部署或重启服务即可生效。
         </div>
       </>
     );
