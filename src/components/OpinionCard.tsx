@@ -1,6 +1,50 @@
 'use client';
 
+import { useState } from 'react';
+
 import type { MatchResult, Opinion } from '@/lib/store';
+
+export const DEFAULT_GREETING = '你好，看到你的观点很有同感，想和你聊聊。';
+
+export function GreetingEditor({
+  onSubmit,
+  busy = false,
+}: {
+  onSubmit: (greeting: string) => void;
+  busy?: boolean;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [greeting, setGreeting] = useState(DEFAULT_GREETING);
+
+  if (!editing) {
+    return (
+      <button type="button" className="btn-ghost" disabled={busy} onClick={() => setEditing(true)}>
+        {busy ? '发送中…' : '发起交流'}
+      </button>
+    );
+  }
+
+  return (
+    <div className="connect-editor">
+      <label className="connect-editor__label">给对方留言（可编辑）</label>
+      <textarea
+        className="connect-editor__input"
+        value={greeting}
+        onChange={(e) => setGreeting(e.target.value)}
+        maxLength={200}
+        rows={3}
+      />
+      <div className="connect-editor__actions">
+        <button type="button" className="btn-primary" disabled={busy} onClick={() => onSubmit(greeting.trim() || DEFAULT_GREETING)}>
+          {busy ? '发送中…' : '发送交流请求'}
+        </button>
+        <button type="button" className="btn-ghost" disabled={busy} onClick={() => setEditing(false)}>
+          取消
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /** 相对时间显示 */
 export function timeAgo(ts: number): string {
@@ -100,10 +144,17 @@ export function MatchCard({
   done = false,
 }: {
   match: MatchResult;
-  onConnect?: () => void;
+  onConnect?: (greeting: string) => void;
   busy?: boolean;
   done?: boolean;
 }) {
+  const [editing, setEditing] = useState(false);
+  const [greeting, setGreeting] = useState(DEFAULT_GREETING);
+
+  function submit() {
+    onConnect?.(greeting.trim() || DEFAULT_GREETING);
+    setEditing(false);
+  }
   return (
     <div className="match-card">
       <header className="opinion__head">
@@ -130,15 +181,39 @@ export function MatchCard({
         </div>
       )}
 
-      {onConnect && (
+      {onConnect && !editing && (
         <button
           type="button"
           className="btn-ghost"
           disabled={busy || done}
-          onClick={onConnect}
+          onClick={() => setEditing(true)}
         >
           {done ? '已发起交流' : busy ? '发送中…' : '发起交流'}
         </button>
+      )}
+
+      {onConnect && editing && !done && (
+        <div className="connect-editor">
+          <label className="connect-editor__label" htmlFor={`greeting-${match.opinion.id}`}>
+            给对方留言（可编辑）
+          </label>
+          <textarea
+            id={`greeting-${match.opinion.id}`}
+            className="connect-editor__input"
+            value={greeting}
+            onChange={(e) => setGreeting(e.target.value)}
+            maxLength={200}
+            rows={3}
+          />
+          <div className="connect-editor__actions">
+            <button type="button" className="btn-primary" disabled={busy} onClick={submit}>
+              {busy ? '发送中…' : '发送交流请求'}
+            </button>
+            <button type="button" className="btn-ghost" disabled={busy} onClick={() => setEditing(false)}>
+              取消
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );

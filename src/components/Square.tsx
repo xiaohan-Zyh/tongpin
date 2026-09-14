@@ -2,7 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react';
 
-import { OpinionCard } from '@/components/OpinionCard';
+import {
+  DEFAULT_GREETING,
+  GreetingEditor,
+  OpinionCard,
+} from '@/components/OpinionCard';
 import type { Opinion } from '@/lib/store';
 
 const PAGE = 10;
@@ -54,7 +58,7 @@ export default function Square({ reloadKey = 0 }: { reloadKey?: number }) {
     void load(0, false);
   }, [load, reloadKey]);
 
-  async function connect(opinion: Opinion) {
+  async function connect(opinion: Opinion, greeting = DEFAULT_GREETING) {
     setBusyId(opinion.id);
     setError(null);
     setOkText(null);
@@ -65,7 +69,7 @@ export default function Square({ reloadKey = 0 }: { reloadKey?: number }) {
         credentials: 'same-origin',
         body: JSON.stringify({
           opinionId: opinion.id,
-          greeting: '你好，看到你的观点很有同感，想和你聊聊。',
+          greeting,
         }),
       });
       const body = await res.json();
@@ -95,18 +99,16 @@ export default function Square({ reloadKey = 0 }: { reloadKey?: number }) {
             key={o.id}
             opinion={o}
             footer={
-              <button
-                type="button"
-                className="btn-ghost"
-                disabled={busyId === o.id || sentIds.has(o.id)}
-                onClick={() => void connect(o)}
-              >
-                {sentIds.has(o.id)
-                  ? '已发起交流'
-                  : busyId === o.id
-                    ? '发送中…'
-                    : '发起交流'}
-              </button>
+              sentIds.has(o.id) ? (
+                <button type="button" className="btn-ghost" disabled>
+                  已发起交流
+                </button>
+              ) : (
+                <GreetingEditor
+                  busy={busyId === o.id}
+                  onSubmit={(greeting) => void connect(o, greeting)}
+                />
+              )
             }
           />
         ))

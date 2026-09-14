@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 
-import { MatchCard } from '@/components/OpinionCard';
+import { DEFAULT_GREETING, MatchCard } from '@/components/OpinionCard';
 import type { MatchResult, Opinion, Visibility } from '@/lib/store';
 
 /**
@@ -138,7 +138,7 @@ export default function Composer({
     setOkText('已放入广场。之后其他人仍可能匹配到你的观点。');
   }
 
-  async function connect(match: MatchResult) {
+  async function connect(match: MatchResult, greeting = DEFAULT_GREETING) {
     setConnectingId(match.opinion.id);
     setError(null);
 
@@ -149,7 +149,7 @@ export default function Composer({
         credentials: 'same-origin',
         body: JSON.stringify({
           opinionId: match.opinion.id,
-          greeting: '你好，看到你的观点很有同感，想和你聊聊。',
+          greeting,
         }),
       });
       const body = await res.json();
@@ -279,7 +279,7 @@ export default function Composer({
               match={m}
               busy={connectingId === m.opinion.id}
               done={connectedIds.has(m.opinion.id)}
-              onConnect={() => void connect(m)}
+              onConnect={(greeting) => void connect(m, greeting)}
             />
           ))}
         </div>

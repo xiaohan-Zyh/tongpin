@@ -132,7 +132,10 @@ export default function MyOpinions({ reloadKey }: { reloadKey: number }) {
     }
   }
 
-  async function connect(match: MatchResult) {
+  async function connect(
+    match: MatchResult,
+    greeting = '你好，看到你的观点很有同感，想和你聊聊。',
+  ) {
     setError(null);
     try {
       const res = await fetch('/api/requests', {
@@ -141,7 +144,7 @@ export default function MyOpinions({ reloadKey }: { reloadKey: number }) {
         credentials: 'same-origin',
         body: JSON.stringify({
           opinionId: match.opinion.id,
-          greeting: '你好，看到你的观点很有同感，想和你聊聊。',
+          greeting,
         }),
       });
       const body = await res.json();
@@ -201,7 +204,7 @@ export default function MyOpinions({ reloadKey }: { reloadKey: number }) {
                       key={m.opinion.id}
                       match={m}
                       done={connectedIds.has(m.opinion.id)}
-                      onConnect={() => void connect(m)}
+                      onConnect={(greeting) => void connect(m, greeting)}
                     />
                   ))}
                 </div>
