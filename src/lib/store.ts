@@ -24,7 +24,15 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 
 import { buildIdf, similarity, tokenize } from '@/lib/similarity';
-import { hgetall, hget, hset, lrangeAll, rpush, setIfAbsent } from '@/lib/kv';
+import {
+  hdel,
+  hgetall,
+  hget,
+  hset,
+  lrangeAll,
+  rpush,
+  setIfAbsent,
+} from '@/lib/kv';
 import type { SessionUser } from '@/lib/types';
 
 /* =========================================================================
@@ -298,6 +306,20 @@ export async function listSquare(viewerId: string, offset = 0, limit = 10) {
     .sort((a, b) => b.createdAt - a.createdAt);
 
   return { items: all.slice(offset, offset + limit), total: all.length };
+}
+
+/** 删除观点；仅作者本人可操作，返回是否实际删除了内容 */
+export async function deleteOpinion(
+  opinionId: string,
+  userId: string,
+): Promise<boolean> {
+  await ensureSeeded();
+
+  const o = await readOne<Opinion>(K_OPINIONS, opinionId);
+  if (!o || o.authorId !== userId) return false;
+
+  await hdel(K_OPINIONS, opinionId);
+  return true;
 }
 
 /** 切换可见性；仅作者本人可操作 */

@@ -580,6 +580,30 @@ button {
   cursor: not-allowed;
 }
 
+/* 删除按钮：卡片右上角轻量叉号 */
+.btn-delete {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  padding: 0 4px;
+  font-size: 18px;
+  line-height: 1;
+  color: var(--text-muted);
+  cursor: pointer;
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+
+.btn-delete:hover:not(:disabled) {
+  color: #e53e3e;
+  background: #fff0f0;
+}
+
+.btn-delete:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
 .btn-danger-ghost {
   background: transparent;
   border: 1px solid var(--border);

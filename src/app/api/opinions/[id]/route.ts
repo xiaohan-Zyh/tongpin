@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 
 import { badRequest, currentUser, notFound, readJson, unauthorized } from '@/lib/api';
-import { updateVisibility, type Visibility } from '@/lib/store';
+import { deleteOpinion, updateVisibility, type Visibility } from '@/lib/store';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,4 +33,23 @@ export async function PATCH(
   if (!updated) return notFound('观点不存在，或你不是该内容的作者。');
 
   return NextResponse.json({ opinion: updated });
+}
+
+/**
+ * DELETE /api/opinions/[id] —— 删除观点
+ *
+ * 仅作者本人可删除，不可恢复。
+ */
+export async function DELETE(
+  _request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const user = await currentUser();
+  if (!user) return unauthorized();
+
+  const { id } = await params;
+  const ok = await deleteOpinion(id, user.id);
+  if (!ok) return notFound('观点不存在，或你不是该内容的作者。');
+
+  return NextResponse.json({ ok: true });
 }

@@ -32,12 +32,14 @@ export function OpinionCard({
   opinion,
   showVisibility = false,
   onToggle,
+  onDelete,
   busy = false,
   footer,
 }: {
   opinion: Opinion;
   showVisibility?: boolean;
   onToggle?: (next: 'public' | 'private') => void;
+  onDelete?: () => void;
   busy?: boolean;
   footer?: React.ReactNode;
 }) {
@@ -50,6 +52,18 @@ export function OpinionCard({
         <span className="opinion__author">{opinion.authorName}</span>
         {opinion.topic && <span className="chip">{opinion.topic}</span>}
         <span className="opinion__time">{timeAgo(opinion.createdAt)}</span>
+        {onDelete && (
+          <button
+            type="button"
+            className="btn-delete"
+            disabled={busy}
+            onClick={onDelete}
+            aria-label="删除这条记录"
+            title="删除"
+          >
+            ×
+          </button>
+        )}
       </header>
 
       <p className="opinion__body">{opinion.content}</p>

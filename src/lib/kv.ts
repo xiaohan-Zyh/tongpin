@@ -143,6 +143,15 @@ export async function hset(
   await command(['HSET', key, field, value]);
 }
 
+/** 删除哈希表中的一个字段 */
+export async function hdel(key: string, field: string): Promise<void> {
+  if (!isRedisConfigured()) {
+    memHash.get(key)?.delete(field);
+    return;
+  }
+  await command(['HDEL', key, field]);
+}
+
 /** 向列表尾部追加元素 */
 export async function rpush(key: string, value: string): Promise<void> {
   if (!isRedisConfigured()) {

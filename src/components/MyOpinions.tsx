@@ -20,6 +20,7 @@ export default function MyOpinions({ reloadKey }: { reloadKey: number }) {
   const [error, setError] = useState<string | null>(null);
 
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   // 展开中的匹配结果：观点 id -> 结果
   const [matchOf, setMatchOf] = useState<Record<string, MatchResult[]>>({});
@@ -54,6 +55,32 @@ export default function MyOpinions({ reloadKey }: { reloadKey: number }) {
   useEffect(() => {
     void load(0, false);
   }, [load, reloadKey]);
+
+  async function remove(opinion: Opinion) {
+    setDeletingId(opinion.id);
+    setError(null);
+    try {
+      const res = await fetch(`/api/opinions/${opinion.id}`, {
+        method: 'DELETE',
+        credentials: 'same-origin',
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error ?? '删除失败');
+
+      setItems((prev) => prev.filter((o) => o.id !== opinion.id));
+      setTotal((t) => t - 1);
+      // 清理该条目关联的匹配结果
+      setMatchOf((prev) => {
+        const copy = { ...prev };
+        delete copy[opinion.id];
+        return copy;
+      });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '删除失败');
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   async function toggle(opinion: Opinion, next: Visibility) {
     setTogglingId(opinion.id);
@@ -139,8 +166,9 @@ export default function MyOpinions({ reloadKey }: { reloadKey: number }) {
             <OpinionCard
               opinion={o}
               showVisibility
-              busy={togglingId === o.id}
+              busy={togglingId === o.id || deletingId === o.id}
               onToggle={(next) => void toggle(o, next)}
+              onDelete={() => void remove(o)}
               footer={
                 o.visibility === 'public' ? (
                   <button
