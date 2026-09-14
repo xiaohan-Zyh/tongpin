@@ -59,6 +59,9 @@ RUN mkdir -p .next/cache
 # 不硬编码 PORT，交由平台注入；本地或未注入时回退 3000，
 # 保证容器监听端口与平台转发端口始终一致。
 ENV HOSTNAME=0.0.0.0
-EXPOSE 3000
+# 以 root 运行，直接绑定平台默认的 80 端口；
+# CloudBase 健康检查探测 80，必须监听 80 才能通过存活/就绪探针。
+ENV PORT=80
+EXPOSE 80
 
-CMD ["sh", "-c", "PORT=${PORT:-3000} node server.js"]
+CMD ["node", "server.js"]
