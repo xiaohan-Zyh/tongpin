@@ -1,0 +1,27 @@
+# 构建产物与依赖（容器内重新安装/构建）
+node_modules
+.next
+out
+
+# 版本控制与编辑器
+.git
+.gitignore
+.vscode
+.idea
+
+# ⚠️ 本地凭据绝不能进入镜像，一律由平台环境变量注入
+.env
+.env.local
+.env*.local
+
+# 文档与临时文件
+*.md
+!README.md
+.DS_Store
+npm-debug.log*
+tsconfig.tsbuildinfo
+
+# 部署配置自身
+Dockerfile
+.dockerignore
+vercel.json
