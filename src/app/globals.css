@@ -666,6 +666,36 @@ button {
   color: #666;
 }
 
+/* 发表后的连接意图询问 */
+
+.post-publish {
+  border: 1px solid #d9e9fb;
+  background: #f7fbff;
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  margin-top: 16px;
+}
+
+.post-publish__title {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.post-publish__sub {
+  margin: 6px 0 0;
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
+.post-publish__actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 14px;
+}
+
 /* 匹配结果 */
 
 .match-panel {

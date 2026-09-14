@@ -8,8 +8,13 @@ import type { MatchResult, Opinion, Visibility } from '@/lib/store';
 /**
  * 观点发表器。
  *
- * 产品核心：把「可见性」与「是否立即匹配」呈现为两个独立选择，
- * 并在选择「仅自己可见」时明确禁用匹配——因为私密内容永不进入匹配池。
+ * 产品核心：把「可见性」与「连接意图」拆成两个独立决策，且都由用户显式选择。
+ *
+ *   1. 发表前选可见性：「仅自己可见」与「公开发表」互斥，点任一侧都能切换；
+ *   2. 发表后选连接意图：公开发表成功后，再询问要不要立即找相似的人。
+ *
+ * 之所以把匹配挪到发表之后，是因为「写下来」和「想认识人」本就是两件事。
+ * 用户可以先把想法放进广场，之后仍可能被别人匹配到，不必在下笔时就决定。
  */
 export default function Composer({
   defaultTopic = '',
@@ -21,11 +26,14 @@ export default function Composer({
   const [content, setContent] = useState('');
   const [topic, setTopic] = useState(defaultTopic);
   const [visibility, setVisibility] = useState<Visibility>('public');
-  const [wantMatch, setWantMatch] = useState(true);
 
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [okText, setOkText] = useState<string | null>(null);
+
+  /** 刚发表成功的公开观点，用于发表后按需发起匹配 */
+  const [justPublished, setJustPublished] = useState<Opinion | null>(null);
+  const [matching, setMatching] = useState(false);
 
   const [matches, setMatches] = useState<MatchResult[] | null>(null);
   const [matchNote, setMatchNote] = useState<string | null>(null);
@@ -33,8 +41,19 @@ export default function Composer({
   const [connectedIds, setConnectedIds] = useState<Set<string>>(new Set());
 
   const isPrivate = visibility === 'private';
-  // 私密内容不参与匹配，界面上同步禁用该选项，避免给出无法实现的承诺
-  const matchEnabled = wantMatch && !isPrivate;
+
+  /** 两个选项互斥：点任意一侧都切换到对应可见性 */
+  function choose(next: Visibility) {
+    setVisibility(next);
+  }
+
+  function resetResult() {
+    setOkText(null);
+    setError(null);
+    setJustPublished(null);
+    setMatches(null);
+    setMatchNote(null);
+  }
 
   async function publish() {
     const text = content.trim();
@@ -44,10 +63,7 @@ export default function Composer({
     }
 
     setBusy(true);
-    setError(null);
-    setOkText(null);
-    setMatches(null);
-    setMatchNote(null);
+    resetResult();
 
     try {
       const res = await fetch('/api/opinions', {
@@ -58,7 +74,8 @@ export default function Composer({
           content: text,
           topic,
           visibility,
-          match: matchEnabled,
+          // 匹配改为发表后由用户单独决定，发表请求本身不触发匹配
+          match: false,
         }),
       });
       const body = await res.json();
@@ -71,26 +88,54 @@ export default function Composer({
         );
       }
 
+      const opinion = body.opinion as Opinion;
       setContent('');
-      setOkText(
-        isPrivate
-          ? '已保存为仅自己可见的记录。'
-          : matchEnabled
-            ? '已发表。'
-            : '已发表。之后其他人仍可能匹配到你的观点。',
-      );
 
-      if (body.matched) {
-        setMatches(body.matches ?? []);
-        setMatchNote(body.note ?? null);
+      if (opinion.visibility === 'private') {
+        setOkText('已保存为仅自己可见的记录，不会进入匹配池。');
+      } else {
+        // 公开内容已进入广场，此时再询问是否主动寻找相似的人
+        setJustPublished(opinion);
+        setOkText('已发表到广场，其他人可能匹配到你。');
       }
 
-      onPublished?.(body.opinion as Opinion);
+      onPublished?.(opinion);
     } catch (err) {
       setError(err instanceof Error ? err.message : '发表失败');
     } finally {
       setBusy(false);
     }
+  }
+
+  /** 发表后按用户意愿发起匹配 */
+  async function findMatches() {
+    if (!justPublished) return;
+
+    setMatching(true);
+    setError(null);
+
+    try {
+      const res = await fetch(
+        `/api/opinions/${justPublished.id}/matches`,
+        { credentials: 'same-origin' },
+      );
+      const body = await res.json();
+      if (!res.ok) throw new Error(body?.error ?? '匹配失败');
+
+      setMatches(body.matches ?? []);
+      setMatchNote(body.note ?? null);
+      setOkText(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '匹配失败');
+    } finally {
+      setMatching(false);
+    }
+  }
+
+  /** 用户选择暂不匹配：内容留在广场，等待被动匹配 */
+  function skipMatch() {
+    setJustPublished(null);
+    setOkText('已放入广场。之后其他人仍可能匹配到你的观点。');
   }
 
   async function connect(match: MatchResult) {
@@ -139,36 +184,28 @@ export default function Composer({
 
       <div className="composer__row">
         <div className="composer__options">
+          {/* 两个选项互斥，点任一侧都可切换 */}
           <label className="opt">
             <input
               type="checkbox"
               checked={isPrivate}
-              onChange={(e) =>
-                setVisibility(e.target.checked ? 'private' : 'public')
-              }
+              onChange={() => choose('private')}
             />
             <span>
               仅自己可见
-              <span className="opt__hint">
-                作为记录贴，不进入匹配池
-              </span>
+              <span className="opt__hint">作为记录贴，不进入匹配池</span>
             </span>
           </label>
 
-          <label className="opt" style={{ opacity: isPrivate ? 0.45 : 1 }}>
+          <label className="opt">
             <input
               type="checkbox"
-              checked={matchEnabled}
-              disabled={isPrivate}
-              onChange={(e) => setWantMatch(e.target.checked)}
+              checked={!isPrivate}
+              onChange={() => choose('public')}
             />
             <span>
-              发表后立即匹配
-              <span className="opt__hint">
-                {isPrivate
-                  ? '私密内容不参与匹配'
-                  : '不勾选也会被其他人匹配到'}
-              </span>
+              公开发表
+              <span className="opt__hint">进入广场，可被他人匹配到</span>
             </span>
           </label>
         </div>
@@ -194,6 +231,34 @@ export default function Composer({
         </div>
       )}
 
+      {/* 发表成功后再询问连接意图，把「写下来」和「想认识人」分成两步 */}
+      {justPublished && matches === null && (
+        <div className="post-publish">
+          <p className="post-publish__title">现在就去找想法相似的人吗？</p>
+          <p className="post-publish__sub">
+            不找也没关系，你的观点已经在广场里，其他人依然可能匹配到你。
+          </p>
+          <div className="post-publish__actions">
+            <button
+              type="button"
+              className="btn-primary"
+              disabled={matching}
+              onClick={() => void findMatches()}
+            >
+              {matching ? '正在寻找…' : '立即匹配'}
+            </button>
+            <button
+              type="button"
+              className="btn-ghost"
+              disabled={matching}
+              onClick={skipMatch}
+            >
+              暂不匹配
+            </button>
+          </div>
+        </div>
+      )}
+
       {matches !== null && (
         <div className="match-panel">
           <h3 className="match-panel__title">
@@ -204,7 +269,8 @@ export default function Composer({
           <p className="match-panel__sub">
             {matches.length > 0
               ? '先看看对方写了什么。发起交流后，对方同意才会开始对话。'
-              : matchNote}
+              : (matchNote ??
+                '你的观点已在广场中，之后仍可能被其他人匹配到。')}
           </p>
 
           {matches.map((m) => (
