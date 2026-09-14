@@ -1,20 +1,30 @@
 import 'server-only';
 
 /**
- * 「同频」领域模型与内存数据仓库。
+ * 「同频」领域模型与数据仓库。
  *
  * 存储选型说明：
- * 黑客松 Demo 采用进程内存 + 预置种子数据。评委点开即可看到真实的匹配
- * 效果，无需先注册多个账号互相发帖。所有读写都集中在本文件，函数签名
- * 即为将来替换 Postgres/Redis 时的接口边界。
+ * 数据通过 `@/lib/kv` 持久化。接入 Upstash Redis 后跨实例共享，
+ * 满足 Vercel 多实例 Serverless 架构的需求；未接入时自动回退进程内存，
+ * 保证本地开发与自动化测试无需依赖外部服务。
  *
- * 已知边界（产品说明中如实标注）：进程重启后新增数据丢失；多实例部署
- * 时各实例数据不共享。
+ * 数据布局（Redis 结构）：
+ *   tongpin:opinions          Hash   观点 id -> JSON
+ *   tongpin:requests          Hash   请求 id -> JSON
+ *   tongpin:threads           Hash   对话 id -> JSON
+ *   tongpin:messages:<id>     List   该对话的消息 JSON 列表
+ *   tongpin:seeded            String 种子数据初始化标记（SET NX 保证只写一次）
+ *
+ * 为什么用 Hash 而非一个大 JSON：
+ * 单条写入只影响一个 field，避免并发写互相覆盖。
+ *
+ * 所有读写函数均为异步，函数签名即为将来替换其他存储的接口边界。
  */
 
 import { randomUUID } from 'node:crypto';
 
 import { buildIdf, similarity, tokenize } from '@/lib/similarity';
+import { hgetall, hget, hset, lrangeAll, rpush, setIfAbsent } from '@/lib/kv';
 import type { SessionUser } from '@/lib/types';
 
 /* =========================================================================
@@ -59,14 +69,22 @@ export interface ContactRequest {
   fromAvatar: string;
   toId: string;
   toName: string;
-  /** 触发本次请求的观点 */
   opinionId: string;
   opinionExcerpt: string;
-  /** 打招呼的话 */
   greeting: string;
   status: RequestStatus;
   createdAt: number;
   respondedAt: number | null;
+}
+
+/** 对话线程：双向同意后才会创建 */
+export interface Thread {
+  id: string;
+  memberIds: string[];
+  memberNames: string[];
+  /** 来源观点摘要，提示「你们因何相识」 */
+  originExcerpt: string;
+  createdAt: number;
 }
 
 export interface Message {
@@ -78,18 +96,7 @@ export interface Message {
   createdAt: number;
 }
 
-/** 对话线程。请求被接受后创建，与请求解耦，便于将来支持多来源建联 */
-export interface Thread {
-  id: string;
-  /** 参与者，固定两人 */
-  memberIds: [string, string];
-  memberNames: [string, string];
-  /** 建立这段关系的观点摘要，作为对话的共同背景 */
-  originExcerpt: string;
-  createdAt: number;
-}
-
-/** 对话列表展示项 */
+/** 对话列表项 */
 export interface ThreadSummary {
   id: string;
   peerName: string;
@@ -100,16 +107,51 @@ export interface ThreadSummary {
 }
 
 /* =========================================================================
- * 存储
+ * 存储键与原语
  * ====================================================================== */
 
-const opinions = new Map<string, Opinion>();
-const requests = new Map<string, ContactRequest>();
-const threads = new Map<string, Thread>();
-const messages = new Map<string, Message[]>();
+const K_OPINIONS = 'tongpin:opinions';
+const K_REQUESTS = 'tongpin:requests';
+const K_THREADS = 'tongpin:threads';
+const K_SEEDED = 'tongpin:seeded';
+const kMessages = (threadId: string) => `tongpin:messages:${threadId}`;
 
 /** 相似度门槛：低于此值视为不相关，宁可不给结果也不用低质量内容凑数 */
 export const MATCH_THRESHOLD = 0.05;
+
+/** 读取哈希表中全部实体，跳过解析失败的脏数据而不是整体崩溃 */
+async function readAll<T>(key: string): Promise<T[]> {
+  const raw = await hgetall(key);
+  const out: T[] = [];
+
+  for (const value of Object.values(raw)) {
+    try {
+      out.push(JSON.parse(value) as T);
+    } catch {
+      // 单条脏数据不应导致整个列表不可用
+    }
+  }
+  return out;
+}
+
+async function readOne<T>(key: string, id: string): Promise<T | null> {
+  const raw = await hget(key, id);
+  if (!raw) return null;
+
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return null;
+  }
+}
+
+async function writeOne(
+  key: string,
+  id: string,
+  value: unknown,
+): Promise<void> {
+  await hset(key, id, JSON.stringify(value));
+}
 
 /* =========================================================================
  * 种子数据
@@ -172,17 +214,23 @@ const SEEDS: Array<{
   },
 ];
 
-let seeded = false;
-
-function ensureSeeded(): void {
-  if (seeded) return;
-  seeded = true;
+/**
+ * 写入演示用种子观点，保证评委打开即可看到真实的匹配效果，
+ * 无需先注册多个账号互相发帖。
+ *
+ * 用 SET NX 抢占初始化权：多实例并发冷启动时只有一个实例真正写入，
+ * 避免种子数据被重复写成多份。
+ */
+async function ensureSeeded(): Promise<void> {
+  const isFirst = await setIfAbsent(K_SEEDED, String(Date.now()));
+  if (!isFirst) return;
 
   const now = Date.now();
   for (const s of SEEDS) {
     const at = now - s.daysAgo * 86_400_000;
     const id = `seed_${s.id}`;
-    opinions.set(id, {
+
+    await writeOne(K_OPINIONS, id, {
       id,
       authorId: s.id,
       authorName: s.name,
@@ -192,7 +240,7 @@ function ensureSeeded(): void {
       visibility: 'public',
       createdAt: at,
       updatedAt: at,
-    });
+    } satisfies Opinion);
   }
 }
 
@@ -200,13 +248,13 @@ function ensureSeeded(): void {
  * 观点
  * ====================================================================== */
 
-export function createOpinion(input: {
+export async function createOpinion(input: {
   author: SessionUser;
   content: string;
   topic: string;
   visibility: Visibility;
-}): Opinion {
-  ensureSeeded();
+}): Promise<Opinion> {
+  await ensureSeeded();
 
   const now = Date.now();
   const opinion: Opinion = {
@@ -221,45 +269,52 @@ export function createOpinion(input: {
     updatedAt: now,
   };
 
-  opinions.set(opinion.id, opinion);
+  await writeOne(K_OPINIONS, opinion.id, opinion);
   return opinion;
 }
 
-export function getOpinion(id: string): Opinion | null {
-  ensureSeeded();
-  return opinions.get(id) ?? null;
+export async function getOpinion(id: string): Promise<Opinion | null> {
+  await ensureSeeded();
+  return readOne<Opinion>(K_OPINIONS, id);
 }
 
 /** 我的全部观点（含仅自己可见），按时间倒序 */
-export function listMyOpinions(userId: string, offset = 0, limit = 10) {
-  ensureSeeded();
-  const all = [...opinions.values()]
+export async function listMyOpinions(userId: string, offset = 0, limit = 10) {
+  await ensureSeeded();
+
+  const all = (await readAll<Opinion>(K_OPINIONS))
     .filter((o) => o.authorId === userId)
     .sort((a, b) => b.createdAt - a.createdAt);
+
   return { items: all.slice(offset, offset + limit), total: all.length };
 }
 
 /** 公开广场，排除自己的内容 */
-export function listSquare(viewerId: string, offset = 0, limit = 10) {
-  ensureSeeded();
-  const all = [...opinions.values()]
+export async function listSquare(viewerId: string, offset = 0, limit = 10) {
+  await ensureSeeded();
+
+  const all = (await readAll<Opinion>(K_OPINIONS))
     .filter((o) => o.visibility === 'public' && o.authorId !== viewerId)
     .sort((a, b) => b.createdAt - a.createdAt);
+
   return { items: all.slice(offset, offset + limit), total: all.length };
 }
 
 /** 切换可见性；仅作者本人可操作 */
-export function updateVisibility(
+export async function updateVisibility(
   opinionId: string,
   userId: string,
   visibility: Visibility,
-): Opinion | null {
-  ensureSeeded();
-  const o = opinions.get(opinionId);
+): Promise<Opinion | null> {
+  await ensureSeeded();
+
+  const o = await readOne<Opinion>(K_OPINIONS, opinionId);
   if (!o || o.authorId !== userId) return null;
 
   o.visibility = visibility;
   o.updatedAt = Date.now();
+  await writeOne(K_OPINIONS, o.id, o);
+
   return o;
 }
 
@@ -275,17 +330,18 @@ export function updateVisibility(
  *   2. 排除自己的观点，避免自我匹配；
  *   3. 低于门槛的结果直接丢弃。
  */
-export function findMatches(
+export async function findMatches(
   sourceId: string,
   viewerId: string,
   limit = 5,
-): MatchResult[] {
-  ensureSeeded();
+): Promise<MatchResult[]> {
+  await ensureSeeded();
 
-  const source = opinions.get(sourceId);
+  const all = await readAll<Opinion>(K_OPINIONS);
+  const source = all.find((o) => o.id === sourceId);
   if (!source || source.visibility !== 'public') return [];
 
-  const candidates = [...opinions.values()].filter(
+  const candidates = all.filter(
     (o) =>
       o.visibility === 'public' && o.id !== sourceId && o.authorId !== viewerId,
   );
@@ -318,8 +374,13 @@ export function findMatches(
  * ====================================================================== */
 
 /** 查找两人之间针对同一观点的未拒绝请求，避免重复打扰 */
-function findLiveRequest(a: string, b: string, opinionId: string) {
-  return [...requests.values()].find(
+function findLiveRequest(
+  all: ContactRequest[],
+  a: string,
+  b: string,
+  opinionId: string,
+): ContactRequest | undefined {
+  return all.find(
     (r) =>
       r.opinionId === opinionId &&
       r.status !== 'declined' &&
@@ -327,14 +388,16 @@ function findLiveRequest(a: string, b: string, opinionId: string) {
   );
 }
 
-export function createRequest(input: {
+export async function createRequest(input: {
   from: SessionUser;
   opinionId: string;
   greeting: string;
-}): { ok: true; request: ContactRequest } | { ok: false; reason: string } {
-  ensureSeeded();
+}): Promise<
+  { ok: true; request: ContactRequest } | { ok: false; reason: string }
+> {
+  await ensureSeeded();
 
-  const opinion = opinions.get(input.opinionId);
+  const opinion = await readOne<Opinion>(K_OPINIONS, input.opinionId);
   if (!opinion) return { ok: false, reason: '该观点不存在或已被删除。' };
   if (opinion.visibility !== 'public') {
     return { ok: false, reason: '该观点未公开，无法发起交流。' };
@@ -343,7 +406,8 @@ export function createRequest(input: {
     return { ok: false, reason: '不能向自己发起交流。' };
   }
 
-  const live = findLiveRequest(input.from.id, opinion.authorId, opinion.id);
+  const all = await readAll<ContactRequest>(K_REQUESTS);
+  const live = findLiveRequest(all, input.from.id, opinion.authorId, opinion.id);
   if (live) {
     return {
       ok: false,
@@ -369,22 +433,24 @@ export function createRequest(input: {
     respondedAt: null,
   };
 
-  requests.set(request.id, request);
+  await writeOne(K_REQUESTS, request.id, request);
   return { ok: true, request };
 }
 
 /** 我收到的待处理请求 */
-export function listIncoming(userId: string): ContactRequest[] {
-  ensureSeeded();
-  return [...requests.values()]
+export async function listIncoming(userId: string): Promise<ContactRequest[]> {
+  await ensureSeeded();
+
+  return (await readAll<ContactRequest>(K_REQUESTS))
     .filter((r) => r.toId === userId && r.status === 'pending')
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
 /** 我发出的请求 */
-export function listOutgoing(userId: string): ContactRequest[] {
-  ensureSeeded();
-  return [...requests.values()]
+export async function listOutgoing(userId: string): Promise<ContactRequest[]> {
+  await ensureSeeded();
+
+  return (await readAll<ContactRequest>(K_REQUESTS))
     .filter((r) => r.fromId === userId)
     .sort((a, b) => b.createdAt - a.createdAt);
 }
@@ -393,16 +459,17 @@ export function listOutgoing(userId: string): ContactRequest[] {
  * 响应交流请求。接受后创建对话线程，并把打招呼的话作为第一条消息。
  * 仅接收方本人可处理，且只能处理一次。
  */
-export function respondRequest(input: {
+export async function respondRequest(input: {
   requestId: string;
   userId: string;
   accept: boolean;
-}):
+}): Promise<
   | { ok: true; request: ContactRequest; threadId: string | null }
-  | { ok: false; reason: string } {
-  ensureSeeded();
+  | { ok: false; reason: string }
+> {
+  await ensureSeeded();
 
-  const request = requests.get(input.requestId);
+  const request = await readOne<ContactRequest>(K_REQUESTS, input.requestId);
   if (!request) return { ok: false, reason: '该请求不存在。' };
   if (request.toId !== input.userId) {
     return { ok: false, reason: '只有被邀请方可以处理该请求。' };
@@ -413,6 +480,7 @@ export function respondRequest(input: {
 
   request.status = input.accept ? 'accepted' : 'declined';
   request.respondedAt = Date.now();
+  await writeOne(K_REQUESTS, request.id, request);
 
   if (!input.accept) return { ok: true, request, threadId: null };
 
@@ -423,18 +491,18 @@ export function respondRequest(input: {
     originExcerpt: request.opinionExcerpt,
     createdAt: Date.now(),
   };
-  threads.set(thread.id, thread);
+  await writeOne(K_THREADS, thread.id, thread);
 
-  messages.set(thread.id, [
-    {
-      id: randomUUID(),
-      threadId: thread.id,
-      senderId: request.fromId,
-      senderName: request.fromName,
-      content: request.greeting || '你好，很高兴遇到想法相似的人。',
-      createdAt: request.createdAt,
-    },
-  ]);
+  // 招呼语成为对话的第一条消息，让对话不是从空白开始
+  const first: Message = {
+    id: randomUUID(),
+    threadId: thread.id,
+    senderId: request.fromId,
+    senderName: request.fromName,
+    content: request.greeting || '你好，很高兴遇到想法相似的人。',
+    createdAt: request.createdAt,
+  };
+  await rpush(kMessages(thread.id), JSON.stringify(first));
 
   return { ok: true, request, threadId: thread.id };
 }
@@ -444,20 +512,41 @@ export function respondRequest(input: {
  * ====================================================================== */
 
 /** 仅线程成员可访问 */
-function getMemberThread(threadId: string, userId: string): Thread | null {
-  const t = threads.get(threadId);
+async function getMemberThread(
+  threadId: string,
+  userId: string,
+): Promise<Thread | null> {
+  const t = await readOne<Thread>(K_THREADS, threadId);
   if (!t || !t.memberIds.includes(userId)) return null;
   return t;
 }
 
-export function listThreads(userId: string): ThreadSummary[] {
-  ensureSeeded();
+/** 读取某个对话的全部消息 */
+async function readMessages(threadId: string): Promise<Message[]> {
+  const raw = await lrangeAll(kMessages(threadId));
+  const out: Message[] = [];
 
-  return [...threads.values()]
-    .filter((t) => t.memberIds.includes(userId))
-    .map((t) => {
-      const thread = messages.get(t.id) ?? [];
-      const last = thread[thread.length - 1];
+  for (const item of raw) {
+    try {
+      out.push(JSON.parse(item) as Message);
+    } catch {
+      // 跳过脏数据
+    }
+  }
+  return out;
+}
+
+export async function listThreads(userId: string): Promise<ThreadSummary[]> {
+  await ensureSeeded();
+
+  const mine = (await readAll<Thread>(K_THREADS)).filter((t) =>
+    t.memberIds.includes(userId),
+  );
+
+  const summaries = await Promise.all(
+    mine.map(async (t) => {
+      const msgs = await readMessages(t.id);
+      const last = msgs[msgs.length - 1];
       const peerIndex = t.memberIds[0] === userId ? 1 : 0;
 
       return {
@@ -466,39 +555,45 @@ export function listThreads(userId: string): ThreadSummary[] {
         originExcerpt: t.originExcerpt,
         lastMessage: last?.content ?? '',
         lastMessageAt: last?.createdAt ?? t.createdAt,
-        messageCount: thread.length,
+        messageCount: msgs.length,
       };
-    })
-    .sort((a, b) => b.lastMessageAt - a.lastMessageAt);
+    }),
+  );
+
+  return summaries.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
 }
 
 /** 读取消息；无权访问返回 null */
-export function listMessages(
+export async function listMessages(
   threadId: string,
   userId: string,
-): { messages: Message[]; peerName: string; originExcerpt: string } | null {
-  ensureSeeded();
+): Promise<{
+  messages: Message[];
+  peerName: string;
+  originExcerpt: string;
+} | null> {
+  await ensureSeeded();
 
-  const t = getMemberThread(threadId, userId);
+  const t = await getMemberThread(threadId, userId);
   if (!t) return null;
 
   const peerIndex = t.memberIds[0] === userId ? 1 : 0;
   return {
-    messages: [...(messages.get(threadId) ?? [])],
+    messages: await readMessages(threadId),
     peerName: t.memberNames[peerIndex],
     originExcerpt: t.originExcerpt,
   };
 }
 
 /** 发送消息；无权访问返回 null */
-export function sendMessage(input: {
+export async function sendMessage(input: {
   threadId: string;
   sender: SessionUser;
   content: string;
-}): Message | null {
-  ensureSeeded();
+}): Promise<Message | null> {
+  await ensureSeeded();
 
-  if (!getMemberThread(input.threadId, input.sender.id)) return null;
+  if (!(await getMemberThread(input.threadId, input.sender.id))) return null;
 
   const message: Message = {
     id: randomUUID(),
@@ -509,21 +604,21 @@ export function sendMessage(input: {
     createdAt: Date.now(),
   };
 
-  const thread = messages.get(input.threadId) ?? [];
-  thread.push(message);
-  messages.set(input.threadId, thread);
-
+  await rpush(kMessages(input.threadId), JSON.stringify(message));
   return message;
 }
 
 /** 顶部导航的角标计数 */
-export function getBadges(userId: string): {
+export async function getBadges(userId: string): Promise<{
   incoming: number;
   threads: number;
-} {
-  ensureSeeded();
-  return {
-    incoming: listIncoming(userId).length,
-    threads: listThreads(userId).length,
-  };
+}> {
+  await ensureSeeded();
+
+  const [incoming, threads] = await Promise.all([
+    listIncoming(userId),
+    listThreads(userId),
+  ]);
+
+  return { incoming: incoming.length, threads: threads.length };
 }

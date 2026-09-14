@@ -19,7 +19,7 @@ export async function GET(
 
   const { id } = await params;
 
-  const opinion = getOpinion(id);
+  const opinion = await getOpinion(id);
   if (!opinion) return notFound('观点不存在或已被删除。');
   if (opinion.authorId !== user.id) {
     return NextResponse.json(
@@ -37,7 +37,7 @@ export async function GET(
     );
   }
 
-  const matches = findMatches(id, user.id);
+  const matches = await findMatches(id, user.id);
 
   return NextResponse.json({
     matches,

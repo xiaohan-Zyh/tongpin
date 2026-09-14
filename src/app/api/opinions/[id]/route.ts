@@ -29,7 +29,7 @@ export async function PATCH(
   }
 
   const { id } = await params;
-  const updated = updateVisibility(id, user.id, body.visibility);
+  const updated = await updateVisibility(id, user.id, body.visibility);
   if (!updated) return notFound('观点不存在，或你不是该内容的作者。');
 
   return NextResponse.json({ opinion: updated });

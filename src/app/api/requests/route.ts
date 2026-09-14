@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
 
   const greeting = (body.greeting ?? '').trim().slice(0, MAX_GREETING);
 
-  const result = createRequest({
+  const result = await createRequest({
     from: user,
     opinionId: body.opinionId,
     greeting,
@@ -45,7 +45,9 @@ export async function GET(request: NextRequest) {
 
   const box = request.nextUrl.searchParams.get('box');
   const items =
-    box === 'outgoing' ? listOutgoing(user.id) : listIncoming(user.id);
+    box === 'outgoing'
+      ? await listOutgoing(user.id)
+      : await listIncoming(user.id);
 
   return NextResponse.json({ items });
 }

@@ -52,7 +52,7 @@ export async function POST(request: NextRequest) {
   const visibility: Visibility =
     body.visibility === 'private' ? 'private' : 'public';
 
-  const opinion = createOpinion({
+  const opinion = await createOpinion({
     author: user,
     content,
     topic: (body.topic ?? '').trim().slice(0, MAX_TOPIC),
@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
 
   // 仅自己可见的内容不参与匹配，即使请求要求匹配也不执行
   const wantMatch = body.match === true && visibility === 'public';
-  const matches = wantMatch ? findMatches(opinion.id, user.id) : [];
+  const matches = wantMatch ? await findMatches(opinion.id, user.id) : [];
 
   return NextResponse.json({
     opinion,
@@ -89,8 +89,8 @@ export async function GET(request: NextRequest) {
 
   const { items, total } =
     sp.get('scope') === 'square'
-      ? listSquare(user.id, offset, limit)
-      : listMyOpinions(user.id, offset, limit);
+      ? await listSquare(user.id, offset, limit)
+      : await listMyOpinions(user.id, offset, limit);
 
   return NextResponse.json(paged(items, offset, total));
 }

@@ -176,7 +176,7 @@ export async function verifyAndConsumeOAuthState(
 
   // 服务端一次性消费：仅删除 Cookie 不足以防重放，攻击者可能同时持有
   // state 与对应 Cookie 并重复提交授权码。
-  if (!consumeStateOnce(saved.state, OAUTH_STATE_TTL_MS)) {
+  if (!(await consumeStateOnce(saved.state, OAUTH_STATE_TTL_MS))) {
     return { ok: false, reason: '该授权请求已被使用，请重新发起登录。' };
   }
 

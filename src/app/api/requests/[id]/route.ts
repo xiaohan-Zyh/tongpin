@@ -27,7 +27,7 @@ export async function POST(
   }
 
   const { id } = await params;
-  const result = respondRequest({
+  const result = await respondRequest({
     requestId: id,
     userId: user.id,
     accept: body.accept,

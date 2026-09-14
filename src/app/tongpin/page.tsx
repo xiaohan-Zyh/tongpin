@@ -21,7 +21,7 @@ export default async function TongpinPage({
   return (
     <TongpinWorkspace
       user={user}
-      initialBadges={getBadges(user.id)}
+      initialBadges={await getBadges(user.id)}
       initialTopic={topic ?? ''}
     />
   );

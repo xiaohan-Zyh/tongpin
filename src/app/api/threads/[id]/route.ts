@@ -16,7 +16,7 @@ export async function GET(
   if (!user) return unauthorized();
 
   const { id } = await params;
-  const data = listMessages(id, user.id);
+  const data = await listMessages(id, user.id);
   // 非会话成员一律按「不存在」处理，不泄露会话是否存在
   if (!data) return notFound('对话不存在或你无权访问。');
 
@@ -43,7 +43,7 @@ export async function POST(
   }
 
   const { id } = await params;
-  const message = sendMessage({ threadId: id, sender: user, content });
+  const message = await sendMessage({ threadId: id, sender: user, content });
   if (!message) return notFound('对话不存在或你无权访问。');
 
   return NextResponse.json({ message });

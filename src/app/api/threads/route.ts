@@ -10,5 +10,5 @@ export async function GET() {
   const user = await currentUser();
   if (!user) return unauthorized();
 
-  return NextResponse.json({ items: listThreads(user.id) });
+  return NextResponse.json({ items: await listThreads(user.id) });
 }
