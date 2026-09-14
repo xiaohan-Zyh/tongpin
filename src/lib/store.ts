@@ -112,6 +112,8 @@ export interface ThreadSummary {
   lastMessage: string;
   lastMessageAt: number;
   messageCount: number;
+  /** 对方发来、且本人尚未读过的消息数；用于列表红点 */
+  unreadCount: number;
 }
 
 /* =========================================================================
@@ -123,6 +125,16 @@ const K_REQUESTS = 'tongpin:requests';
 const K_THREADS = 'tongpin:threads';
 const K_SEEDED = 'tongpin:seeded';
 const kMessages = (threadId: string) => `tongpin:messages:${threadId}`;
+
+/**
+ * 已读水位：记录某人在某个会话中最后一次读到的时间点。
+ *
+ * 之所以存「时间戳」而不是「未读条数」：
+ * 计数需要在每次发消息时对所有成员做自增，写放大且容易错乱；
+ * 水位只在「本人打开会话」时写一次，未读数由消息时间比对算出，
+ * 天然幂等，多端打开也不会互相覆盖出错。
+ */
+const kRead = (userId: string) => `tongpin:read:${userId}`;
 
 /** 相似度门槛：低于此值视为不相关，宁可不给结果也不用低质量内容凑数 */
 export const MATCH_THRESHOLD = 0.05;
@@ -558,6 +570,33 @@ async function readMessages(threadId: string): Promise<Message[]> {
   return out;
 }
 
+/** 读取本人在各会话的已读水位：threadId -> 时间戳 */
+async function readWatermarks(userId: string): Promise<Record<string, number>> {
+  const raw = await hgetall(kRead(userId));
+  const out: Record<string, number> = {};
+
+  for (const [threadId, value] of Object.entries(raw)) {
+    const n = Number(value);
+    if (Number.isFinite(n)) out[threadId] = n;
+  }
+  return out;
+}
+
+/**
+ * 把某个会话标记为已读（把水位推到当前时间）。
+ * 仅会话成员可操作，非成员返回 false。
+ */
+export async function markThreadRead(
+  threadId: string,
+  userId: string,
+): Promise<boolean> {
+  const t = await getMemberThread(threadId, userId);
+  if (!t) return false;
+
+  await hset(kRead(userId), threadId, String(Date.now()));
+  return true;
+}
+
 export async function listThreads(userId: string): Promise<ThreadSummary[]> {
   await ensureSeeded();
 
@@ -565,11 +604,20 @@ export async function listThreads(userId: string): Promise<ThreadSummary[]> {
     t.memberIds.includes(userId),
   );
 
+  const watermarks = await readWatermarks(userId);
+
   const summaries = await Promise.all(
     mine.map(async (t) => {
       const msgs = await readMessages(t.id);
       const last = msgs[msgs.length - 1];
       const peerIndex = t.memberIds[0] === userId ? 1 : 0;
+
+      // 只有「对方发的」且「晚于已读水位」的消息才算未读；
+      // 自己发的消息永远不该让自己看到红点
+      const readAt = watermarks[t.id] ?? 0;
+      const unreadCount = msgs.filter(
+        (m) => m.senderId !== userId && m.createdAt > readAt,
+      ).length;
 
       return {
         id: t.id,
@@ -578,6 +626,7 @@ export async function listThreads(userId: string): Promise<ThreadSummary[]> {
         lastMessage: last?.content ?? '',
         lastMessageAt: last?.createdAt ?? t.createdAt,
         messageCount: msgs.length,
+        unreadCount,
       };
     }),
   );
@@ -585,7 +634,12 @@ export async function listThreads(userId: string): Promise<ThreadSummary[]> {
   return summaries.sort((a, b) => b.lastMessageAt - a.lastMessageAt);
 }
 
-/** 读取消息；无权访问返回 null */
+/**
+ * 读取消息；无权访问返回 null。
+ *
+ * 读取即视为已读：会顺带把该会话的已读水位推到当前时间，
+ * 使对应红点在用户点开对话后自动消失。
+ */
 export async function listMessages(
   threadId: string,
   userId: string,
@@ -600,8 +654,13 @@ export async function listMessages(
   if (!t) return null;
 
   const peerIndex = t.memberIds[0] === userId ? 1 : 0;
+  const messages = await readMessages(threadId);
+
+  // 先取完消息再更新水位，避免把「本次尚未返回给用户的消息」也标成已读
+  await hset(kRead(userId), threadId, String(Date.now()));
+
   return {
-    messages: await readMessages(threadId),
+    messages,
     peerName: t.memberNames[peerIndex],
     originExcerpt: t.originExcerpt,
   };
@@ -642,5 +701,9 @@ export async function getBadges(userId: string): Promise<{
     listThreads(userId),
   ]);
 
-  return { incoming: incoming.length, threads: threads.length };
+  // 「对话」角标表示有多少个会话存在未读消息，而不是会话总数——
+  // 否则读完所有消息后角标依然常亮，失去提醒意义
+  const unreadThreads = threads.filter((t) => t.unreadCount > 0).length;
+
+  return { incoming: incoming.length, threads: unreadThreads };
 }

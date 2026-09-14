@@ -9,9 +9,12 @@ import type { Message, ThreadSummary } from '@/lib/store';
 export default function Chat({
   currentUserId,
   reloadKey,
+  onUnreadChange,
 }: {
   currentUserId: string;
   reloadKey: number;
+  /** 未读会话数变化时通知上层，用于同步顶部标签角标 */
+  onUnreadChange?: (unreadThreads: number) => void;
 }) {
   const [threads, setThreads] = useState<ThreadSummary[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
@@ -40,6 +43,7 @@ export default function Chat({
       }
       const list: ThreadSummary[] = body.items ?? [];
       setThreads(list);
+      onUnreadChange?.(list.filter((t) => t.unreadCount > 0).length);
       // 默认选中第一个会话，避免右侧空白
       setActiveId((prev) => prev ?? list[0]?.id ?? null);
     } catch (err) {
@@ -47,31 +51,44 @@ export default function Chat({
     } finally {
       setLoadingList(false);
     }
-  }, []);
+  }, [onUnreadChange]);
 
   useEffect(() => {
     void loadThreads();
   }, [loadThreads, reloadKey]);
 
-  const loadMessages = useCallback(async (threadId: string) => {
-    setLoadingChat(true);
-    setError(null);
-    try {
-      const res = await fetch(`/api/threads/${threadId}`, {
-        credentials: 'same-origin',
-      });
-      const body = await res.json();
-      if (!res.ok) throw new Error(body?.error ?? '加载对话失败');
+  const loadMessages = useCallback(
+    async (threadId: string) => {
+      setLoadingChat(true);
+      setError(null);
+      try {
+        const res = await fetch(`/api/threads/${threadId}`, {
+          credentials: 'same-origin',
+        });
+        const body = await res.json();
+        if (!res.ok) throw new Error(body?.error ?? '加载对话失败');
 
-      setMessages(body.messages ?? []);
-      setPeerName(body.peerName ?? '');
-      setOrigin(body.originExcerpt ?? '');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : '加载对话失败');
-    } finally {
-      setLoadingChat(false);
-    }
-  }, []);
+        setMessages(body.messages ?? []);
+        setPeerName(body.peerName ?? '');
+        setOrigin(body.originExcerpt ?? '');
+
+        // 服务端在返回消息时已把该会话标记为已读，
+        // 这里同步清掉本地红点，无需等待下一次列表刷新
+        setThreads((prev) => {
+          const next = prev.map((t) =>
+            t.id === threadId ? { ...t, unreadCount: 0 } : t,
+          );
+          onUnreadChange?.(next.filter((t) => t.unreadCount > 0).length);
+          return next;
+        });
+      } catch (err) {
+        setError(err instanceof Error ? err.message : '加载对话失败');
+      } finally {
+        setLoadingChat(false);
+      }
+    },
+    [onUnreadChange],
+  );
 
   useEffect(() => {
     if (activeId) void loadMessages(activeId);
@@ -134,7 +151,14 @@ export default function Chat({
               className={`thread-item${t.id === activeId ? ' thread-item--active' : ''}`}
               onClick={() => setActiveId(t.id)}
             >
-              <p className="thread-item__name">{t.peerName}</p>
+              <div className="thread-item__row">
+                <p className="thread-item__name">{t.peerName}</p>
+                {t.unreadCount > 0 && (
+                  <span className="unread-dot" aria-label={`${t.unreadCount} 条未读消息`}>
+                    {t.unreadCount > 99 ? '99+' : t.unreadCount}
+                  </span>
+                )}
+              </div>
               <p className="thread-item__last">
                 {t.lastMessage || '（还没有消息）'}
               </p>

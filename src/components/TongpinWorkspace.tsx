@@ -30,11 +30,14 @@ export default function TongpinWorkspace({
   const [opinionKey, setOpinionKey] = useState(0);
   const [threadKey, setThreadKey] = useState(0);
 
+  // 未读会话数：初始值来自服务端，之后由 Chat 组件实时更新
+  const [unreadThreads, setUnreadThreads] = useState(initialBadges.threads);
+
   const tabs: Array<{ id: Tab; label: string; badge?: number }> = [
     { id: 'record', label: '我的记录' },
     { id: 'square', label: '广场' },
     { id: 'requests', label: '交流请求', badge: initialBadges.incoming },
-    { id: 'chat', label: '对话', badge: initialBadges.threads },
+    { id: 'chat', label: '对话', badge: unreadThreads },
   ];
 
   return (
@@ -80,7 +83,12 @@ export default function TongpinWorkspace({
           />
         )}
         {tab === 'chat' && (
-          <Chat key="chat" currentUserId={user.id} reloadKey={threadKey} />
+          <Chat
+            key="chat"
+            currentUserId={user.id}
+            reloadKey={threadKey}
+            onUnreadChange={setUnreadThreads}
+          />
         )}
       </div>
     </>
