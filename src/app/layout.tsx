@@ -6,8 +6,8 @@ import { getSessionUser } from '@/lib/session';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: '知乎热榜 · Next.js 全栈示例',
-  description: '基于知乎开放平台的热榜展示与 OAuth 登录示例应用',
+  title: '同频',
+  description: '写下你的观点，找到想法相似的人',
 };
 
 export default async function RootLayout({
@@ -23,11 +23,10 @@ export default async function RootLayout({
       <body>
         <header className="site-header">
           <div className="site-header__inner">
-            <a href="/" className="site-header__brand">
-              知乎热榜
+            <a href="/tongpin" className="site-header__brand">
+              同频
             </a>
             <nav className="site-header__nav">
-              <a href="/">热榜</a>
               <a href="/tongpin">同频</a>
               {user && <a href="/me">我的</a>}
             </nav>
