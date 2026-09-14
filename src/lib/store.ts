@@ -309,12 +309,12 @@ export async function listMyOpinions(userId: string, offset = 0, limit = 10) {
   return { items: all.slice(offset, offset + limit), total: all.length };
 }
 
-/** 公开广场，排除自己的内容 */
-export async function listSquare(viewerId: string, offset = 0, limit = 10) {
+/** 公开广场，包含本人发布的公开内容 */
+export async function listSquare(_viewerId: string, offset = 0, limit = 10) {
   await ensureSeeded();
 
   const all = (await readAll<Opinion>(K_OPINIONS))
-    .filter((o) => o.visibility === 'public' && o.authorId !== viewerId)
+    .filter((o) => o.visibility === 'public')
     .sort((a, b) => b.createdAt - a.createdAt);
 
   return { items: all.slice(offset, offset + limit), total: all.length };
