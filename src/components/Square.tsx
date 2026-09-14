@@ -10,8 +10,10 @@ const PAGE = 10;
 /**
  * 公开广场：浏览他人公开的观点，可直接发起交流。
  * 仅自己可见的内容不会出现在这里。
+ *
+ * reloadKey 变化时重新拉取，使用户在本页发表观点后能立即看到广场更新。
  */
-export default function Square() {
+export default function Square({ reloadKey = 0 }: { reloadKey?: number }) {
   const [items, setItems] = useState<Opinion[]>([]);
   const [nextOffset, setNextOffset] = useState<number | null>(0);
   const [total, setTotal] = useState(0);
@@ -50,7 +52,7 @@ export default function Square() {
 
   useEffect(() => {
     void load(0, false);
-  }, [load]);
+  }, [load, reloadKey]);
 
   async function connect(opinion: Opinion) {
     setBusyId(opinion.id);

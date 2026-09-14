@@ -44,12 +44,12 @@ export default function TongpinWorkspace({
         写下你的观点，找到想法相似的人。对方同意后才会开始对话。
       </p>
 
-      {tab === 'record' && (
-        <Composer
-          defaultTopic={initialTopic}
-          onPublished={() => setOpinionKey((k) => k + 1)}
-        />
-      )}
+      {/* 发表器常驻在所有标签之上：无论在看广场、请求还是对话，
+          都能随时写下当下的想法，不必先切回「我的记录」 */}
+      <Composer
+        defaultTopic={initialTopic}
+        onPublished={() => setOpinionKey((k) => k + 1)}
+      />
 
       <div className="card" style={{ marginTop: 20 }}>
         <div className="tabs" role="tablist">
@@ -72,7 +72,7 @@ export default function TongpinWorkspace({
         {tab === 'record' && (
           <MyOpinions key="record" reloadKey={opinionKey} />
         )}
-        {tab === 'square' && <Square key="square" />}
+        {tab === 'square' && <Square key="square" reloadKey={opinionKey} />}
         {tab === 'requests' && (
           <Requests
             key="requests"
