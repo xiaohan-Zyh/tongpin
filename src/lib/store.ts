@@ -81,6 +81,8 @@ export interface ContactRequest {
   opinionExcerpt: string;
   greeting: string;
   status: RequestStatus;
+  /** 同意后关联的对话线程；旧数据可能没有此字段 */
+  threadId?: string | null;
   createdAt: number;
   respondedAt: number | null;
 }
@@ -471,12 +473,12 @@ export async function createRequest(input: {
   return { ok: true, request };
 }
 
-/** 我收到的待处理请求 */
+/** 我收到的全部请求，包含已同意和已拒绝的历史记录 */
 export async function listIncoming(userId: string): Promise<ContactRequest[]> {
   await ensureSeeded();
 
   return (await readAll<ContactRequest>(K_REQUESTS))
-    .filter((r) => r.toId === userId && r.status === 'pending')
+    .filter((r) => r.toId === userId)
     .sort((a, b) => b.createdAt - a.createdAt);
 }
 
@@ -514,9 +516,12 @@ export async function respondRequest(input: {
 
   request.status = input.accept ? 'accepted' : 'declined';
   request.respondedAt = Date.now();
-  await writeOne(K_REQUESTS, request.id, request);
 
-  if (!input.accept) return { ok: true, request, threadId: null };
+  if (!input.accept) {
+    request.threadId = null;
+    await writeOne(K_REQUESTS, request.id, request);
+    return { ok: true, request, threadId: null };
+  }
 
   const thread: Thread = {
     id: randomUUID(),
@@ -525,6 +530,8 @@ export async function respondRequest(input: {
     originExcerpt: request.opinionExcerpt,
     createdAt: Date.now(),
   };
+  request.threadId = thread.id;
+  await writeOne(K_REQUESTS, request.id, request);
   await writeOne(K_THREADS, thread.id, thread);
 
   // 招呼语成为对话的第一条消息，让对话不是从空白开始
@@ -696,10 +703,11 @@ export async function getBadges(userId: string): Promise<{
 }> {
   await ensureSeeded();
 
-  const [incoming, threads] = await Promise.all([
+  const [allIncoming, threads] = await Promise.all([
     listIncoming(userId),
     listThreads(userId),
   ]);
+  const incoming = allIncoming.filter((request) => request.status === 'pending');
 
   // 「对话」角标表示有多少个会话存在未读消息，而不是会话总数——
   // 否则读完所有消息后角标依然常亮，失去提醒意义

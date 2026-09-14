@@ -11,8 +11,10 @@ import type { ContactRequest } from '@/lib/store';
  */
 export default function Requests({
   onAccepted,
+  onOpenThread,
 }: {
   onAccepted?: () => void;
+  onOpenThread?: (threadId: string) => void;
 }) {
   const [box, setBox] = useState<'incoming' | 'outgoing'>('incoming');
   const [items, setItems] = useState<ContactRequest[]>([]);
@@ -64,8 +66,10 @@ export default function Requests({
       const body = await res.json();
       if (!res.ok) throw new Error(body?.error ?? '处理失败');
 
-      setItems((prev) => prev.filter((r) => r.id !== req.id));
-      setOkText(accept ? '已同意，可以在「对话」中开始聊天了。' : '已拒绝该请求。');
+      setItems((prev) =>
+        prev.map((r) => (r.id === req.id ? body.request as ContactRequest : r)),
+      );
+      setOkText(accept ? '已同意，可以进入对应对话了。' : '已拒绝该请求，记录已保留。');
       if (accept) onAccepted?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : '处理失败');
@@ -75,7 +79,7 @@ export default function Requests({
   }
 
   const statusText: Record<string, string> = {
-    pending: '等待对方回应',
+    pending: box === 'incoming' ? '待处理' : '等待对方回应',
     accepted: '已同意',
     declined: '已拒绝',
   };
@@ -123,15 +127,15 @@ export default function Requests({
                 {box === 'incoming' ? r.fromName : r.toName}
               </span>
               <span className="opinion__time">{timeAgo(r.createdAt)}</span>
-              {box === 'outgoing' && (
-                <span className="chip chip--score">{statusText[r.status]}</span>
-              )}
+              <span className={`chip chip--score req__status req__status--${r.status}`}>
+                {statusText[r.status]}
+              </span>
             </div>
 
             <div className="req__quote">因这条观点：{r.opinionExcerpt}…</div>
             {r.greeting && <p className="req__greeting">{r.greeting}</p>}
 
-            {box === 'incoming' && (
+            {box === 'incoming' && r.status === 'pending' && (
               <div className="req__actions">
                 <button
                   type="button"
@@ -148,6 +152,18 @@ export default function Requests({
                   onClick={() => void respond(r, false)}
                 >
                   拒绝
+                </button>
+              </div>
+            )}
+
+            {r.status === 'accepted' && r.threadId && (
+              <div className="req__actions">
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => onOpenThread?.(r.threadId as string)}
+                >
+                  进入对话 →
                 </button>
               </div>
             )}

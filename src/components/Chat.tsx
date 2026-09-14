@@ -9,10 +9,12 @@ import type { Message, ThreadSummary } from '@/lib/store';
 export default function Chat({
   currentUserId,
   reloadKey,
+  requestedThreadId,
   onUnreadChange,
 }: {
   currentUserId: string;
   reloadKey: number;
+  requestedThreadId?: string | null;
   /** 未读会话数变化时通知上层，用于同步顶部标签角标 */
   onUnreadChange?: (unreadThreads: number) => void;
 }) {
@@ -45,13 +47,17 @@ export default function Chat({
       setThreads(list);
       onUnreadChange?.(list.filter((t) => t.unreadCount > 0).length);
       // 默认选中第一个会话，避免右侧空白
-      setActiveId((prev) => prev ?? list[0]?.id ?? null);
+      setActiveId((prev) =>
+        requestedThreadId && list.some((t) => t.id === requestedThreadId)
+          ? requestedThreadId
+          : prev ?? list[0]?.id ?? null,
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : '加载失败');
     } finally {
       setLoadingList(false);
     }
-  }, [onUnreadChange]);
+  }, [onUnreadChange, requestedThreadId]);
 
   useEffect(() => {
     void loadThreads();

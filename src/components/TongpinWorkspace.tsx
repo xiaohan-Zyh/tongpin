@@ -29,6 +29,7 @@ export default function TongpinWorkspace({
   // 发表或接受请求后，用递增 key 触发对应列表重新拉取
   const [opinionKey, setOpinionKey] = useState(0);
   const [threadKey, setThreadKey] = useState(0);
+  const [requestedThreadId, setRequestedThreadId] = useState<string | null>(null);
 
   // 未读会话数：初始值来自服务端，之后由 Chat 组件实时更新
   const [unreadThreads, setUnreadThreads] = useState(initialBadges.threads);
@@ -80,6 +81,10 @@ export default function TongpinWorkspace({
           <Requests
             key="requests"
             onAccepted={() => setThreadKey((k) => k + 1)}
+            onOpenThread={(threadId) => {
+              setRequestedThreadId(threadId);
+              setTab('chat');
+            }}
           />
         )}
         {tab === 'chat' && (
@@ -87,6 +92,7 @@ export default function TongpinWorkspace({
             key="chat"
             currentUserId={user.id}
             reloadKey={threadKey}
+            requestedThreadId={requestedThreadId}
             onUnreadChange={setUnreadThreads}
           />
         )}
